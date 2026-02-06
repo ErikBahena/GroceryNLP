@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GroceryNLP — On-Device Voice Parsing</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/ort.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
     body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -13,31 +14,55 @@
     .fade-in { animation: fadeIn 0.4s ease-out; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
-    .pulse-ring {
-      animation: pulseRing 1.5s ease-out infinite;
-    }
-    @keyframes pulseRing {
-      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-      70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-    }
-
-    .item-card { animation: slideUp 0.35s ease-out both; }
-    .item-card:nth-child(1) { animation-delay: 0ms; }
-    .item-card:nth-child(2) { animation-delay: 80ms; }
-    .item-card:nth-child(3) { animation-delay: 160ms; }
-    .item-card:nth-child(4) { animation-delay: 240ms; }
-    .item-card:nth-child(5) { animation-delay: 320ms; }
-    @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+    .slide-up { animation: slideUp 0.35s ease-out both; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 
     .typing-cursor::after {
       content: '|';
       animation: blink 0.8s step-end infinite;
       color: #3b82f6;
+      font-weight: 300;
     }
     @keyframes blink { 50% { opacity: 0; } }
 
-    .metric-bar { transition: width 0.6s ease-out; }
+    .pulse-ring { animation: pulseRing 1.5s ease-out infinite; }
+    @keyframes pulseRing {
+      0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+      70% { box-shadow: 0 0 0 20px rgba(59, 130, 246, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+    }
+
+    .toast-enter { animation: toastIn 0.3s ease-out; }
+    .toast-exit { animation: toastOut 0.25s ease-in forwards; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes toastOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(8px) scale(0.95); } }
+
+    .grocery-item-enter {
+      animation: itemEnter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    @keyframes itemEnter {
+      from { opacity: 0; transform: translateY(-8px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .grocery-item-exit {
+      animation: itemExit 0.3s ease-in forwards;
+    }
+    @keyframes itemExit {
+      from { opacity: 1; transform: translateX(0) scale(1); }
+      to { opacity: 0; transform: translateX(40px) scale(0.9); }
+    }
+
+    .grocery-item-highlight {
+      animation: itemHighlight 0.6s ease-out;
+    }
+    @keyframes itemHighlight {
+      0% { background-color: rgba(59, 130, 246, 0.1); }
+      100% { background-color: transparent; }
+    }
+
+    .checked-item { opacity: 0.5; }
+    .checked-item .item-name { text-decoration: line-through; }
   </style>
   <script>
     tailwind.config = {
@@ -57,7 +82,6 @@
   <nav class="fixed top-0 w-full bg-white/80 backdrop-blur-lg border-b border-neutral-100 z-50">
     <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <!-- Logo mark: voice waveform × grocery list in a rounded square -->
         <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
@@ -66,18 +90,13 @@
             </linearGradient>
           </defs>
           <rect width="32" height="32" rx="8" fill="url(#logo-grad)"/>
-          <!-- Mic body (vertical pill) -->
           <rect x="8" y="7" width="5" height="12" rx="2.5" fill="white" opacity="0.95"/>
-          <!-- Mic base arc -->
           <path d="M7 17.5a3.5 3.5 0 0 0 7 0" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
-          <!-- Mic stand -->
           <line x1="10.5" y1="21" x2="10.5" y2="24" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
-          <!-- List lines / sound waves (right side) -->
           <rect x="17" y="9.5" width="8" height="1.8" rx="0.9" fill="white" opacity="0.9"/>
           <rect x="17" y="15.1" width="6" height="1.8" rx="0.9" fill="white" opacity="0.55"/>
           <rect x="17" y="20.7" width="4.5" height="1.8" rx="0.9" fill="white" opacity="0.3"/>
         </svg>
-        <!-- Wordmark -->
         <div class="flex items-baseline leading-none">
           <span class="text-[15px] font-light tracking-tight text-neutral-900">grocery</span><span class="text-[15px] font-semibold tracking-tight text-neutral-900">nlp</span>
         </div>
@@ -85,7 +104,7 @@
       <div class="flex items-center gap-5">
         <span id="model-status" class="text-xs text-neutral-400 font-medium">Loading model...</span>
         <div class="w-px h-4 bg-neutral-200"></div>
-        <a href="https://github.com/ErikBahena/GroceryNLP" target="_blank" class="flex items-center gap-2 text-neutral-400 hover:text-neutral-600 transition-colors" aria-label="GitHub">
+        <a href="https://github.com/ErikBahena/Voice-Grocery" target="_blank" class="flex items-center gap-2 text-neutral-400 hover:text-neutral-600 transition-colors" aria-label="GitHub">
           <svg class="w-[18px] h-[18px]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
         </a>
         <a href="https://github.com/ErikBahena" target="_blank" class="shrink-0" aria-label="ErikBahena on GitHub">
@@ -95,8 +114,8 @@
     </div>
   </nav>
 
-  <!-- Hero -->
   <main class="max-w-5xl mx-auto px-6">
+    <!-- Hero -->
     <section class="pt-32 pb-16">
       <div class="max-w-2xl">
         <h1 class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] text-neutral-900">
@@ -107,15 +126,14 @@
           A 0.6MB neural network that extracts items, quantities, stores, and categories from natural speech. Runs entirely in your browser.
         </p>
       </div>
-
       <!-- Metrics row -->
       <div class="mt-10 flex flex-wrap gap-8">
         <div>
-          <div class="text-2xl font-semibold tabular-nums" id="metric-size">0.63<span class="text-sm font-normal text-neutral-400 ml-1">MB</span></div>
+          <div class="text-2xl font-semibold tabular-nums">0.63<span class="text-sm font-normal text-neutral-400 ml-1">MB</span></div>
           <div class="text-xs text-neutral-400 mt-0.5">Model size</div>
         </div>
         <div>
-          <div class="text-2xl font-semibold tabular-nums" id="metric-latency"><span id="latency-value">—</span><span class="text-sm font-normal text-neutral-400 ml-1">ms</span></div>
+          <div class="text-2xl font-semibold tabular-nums"><span id="latency-value">—</span><span class="text-sm font-normal text-neutral-400 ml-1">ms</span></div>
           <div class="text-xs text-neutral-400 mt-0.5">Inference</div>
         </div>
         <div>
@@ -133,54 +151,73 @@
       </div>
     </section>
 
-    <!-- Input section -->
-    <section class="pb-8">
-      <div class="bg-surface rounded-2xl border border-neutral-200 p-1.5">
-        <div class="flex items-center gap-3">
-          <button id="mic-btn" onclick="toggleMic()" disabled
-            class="shrink-0 w-12 h-12 rounded-xl bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
-            <svg id="mic-icon" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
-            <svg id="mic-stop-icon" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+    <!-- Listening card -->
+    <section class="pb-6">
+      <div class="bg-surface rounded-2xl border border-neutral-200 p-6">
+        <!-- Status row -->
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <div id="status-dot" class="w-2 h-2 rounded-full bg-neutral-300 transition-colors"></div>
+            <span id="status-text" class="text-sm text-neutral-400 font-medium">Ready</span>
+          </div>
+          <span id="vad-status" class="text-[10px] text-neutral-300 font-mono"></span>
+        </div>
+
+        <!-- Waveform canvas -->
+        <div class="mb-2 rounded-xl bg-white border border-neutral-100 overflow-hidden" style="height: 80px;">
+          <canvas id="waveform-canvas" class="w-full block" style="height: 80px;"></canvas>
+        </div>
+
+        <!-- Live transcript -->
+        <div id="transcript-area" class="min-h-[1.25rem] mb-2">
+          <p id="live-transcript" class="text-base text-neutral-500 italic"></p>
+        </div>
+
+        <!-- Input bar with mic button -->
+        <div class="bg-white rounded-xl border border-neutral-200 p-1.5 flex items-center gap-2">
+          <button id="mic-btn" onclick="App.toggleMic()" disabled
+            class="shrink-0 w-10 h-10 rounded-lg bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <svg id="mic-icon" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+            </svg>
+            <svg id="mic-stop-icon" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+            </svg>
           </button>
           <input id="text-input" type="text"
-            placeholder="Try &quot;add 2 gallons of milk and a loaf of bread from Costco&quot;"
-            class="flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400 h-12"
+            placeholder="Try &quot;add 2 gallons of milk and bread from Costco&quot;"
+            class="flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-400 h-10"
             disabled
-            onkeydown="if(event.key==='Enter')runInference()">
-          <button onclick="runInference()" id="parse-btn" disabled
-            class="shrink-0 h-10 px-5 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            onkeydown="if(event.key==='Enter'){App.processTextInput();event.preventDefault();}">
+          <button onclick="App.processTextInput()" id="parse-btn" disabled
+            class="shrink-0 h-10 px-4 rounded-lg bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
             Parse
           </button>
         </div>
       </div>
-      <div class="mt-3 flex items-center justify-between">
-        <p id="speech-hint" class="text-xs text-neutral-400">Press the mic or type a grocery command</p>
-        <p id="speech-status" class="text-xs text-neutral-400 hidden"></p>
-      </div>
     </section>
 
-    <!-- Results -->
-    <section id="results-section" class="pb-20 hidden">
-      <!-- Intent bar -->
-      <div class="flex items-center gap-3 mb-6 fade-in">
-        <span id="intent-badge" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"></span>
-        <span id="parse-time" class="text-xs text-neutral-400 tabular-nums"></span>
-      </div>
-
-      <!-- Item cards -->
-      <div id="items-container" class="space-y-3"></div>
-
-      <!-- Raw output toggle -->
-      <button onclick="toggleRaw()" class="mt-6 text-xs text-neutral-400 hover:text-neutral-600 transition-colors underline underline-offset-2">
-        Show raw output
-      </button>
-      <pre id="raw-output" class="hidden mt-3 p-4 bg-neutral-50 rounded-xl border border-neutral-100 text-xs text-neutral-600 overflow-x-auto"></pre>
-    </section>
-
-    <!-- Examples -->
-    <section class="pb-20">
-      <h3 class="text-xs font-medium text-neutral-400 uppercase tracking-widest mb-4">Try these</h3>
+    <!-- Suggestions -->
+    <section class="pb-6">
+      <h3 class="text-xs font-medium text-neutral-400 uppercase tracking-widest mb-3">Try saying</h3>
       <div class="flex flex-wrap gap-2" id="examples-container"></div>
+    </section>
+
+    <!-- Grocery list -->
+    <section class="pb-20">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-neutral-900">Grocery List</h2>
+        <button id="clear-list-btn" onclick="GroceryList.clear()" class="text-xs text-neutral-400 hover:text-red-500 transition-colors hidden">
+          Clear all
+        </button>
+      </div>
+      <div id="grocery-list-container">
+        <div id="empty-state" class="text-center py-12 text-neutral-400">
+          <div class="text-4xl mb-3">🛒</div>
+          <p class="text-sm">Your list is empty — start by saying something</p>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -195,8 +232,13 @@
     </div>
   </footer>
 
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2"></div>
+
 <script>
-// ─── Constants ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════════
 const MAX_SEQ_LEN = 128;
 const PAD = 0, UNK = 1, OFFSET = 2;
 const MAX_WORDS = 32;
@@ -205,19 +247,19 @@ const INTENTS = ['add', 'remove', 'check', 'uncheck', 'clear', 'update'];
 const ENTITY_TAGS = ['O','B-ITEM','I-ITEM','B-QTY','I-QTY','B-UNIT','I-UNIT','B-STORE','I-STORE','B-VERB','I-VERB'];
 const CATEGORIES = ['Fruits & Vegetables','Meats','Dairy','Bakery','Canned & Packaged','Frozen','Beverages','Deli','Snacks','Pantry Staples','Other'];
 
-const INTENT_COLORS = {
-  add: { bg: 'bg-emerald-50', text: 'text-emerald-700', icon: '+' },
-  remove: { bg: 'bg-red-50', text: 'text-red-700', icon: '−' },
-  check: { bg: 'bg-blue-50', text: 'text-blue-700', icon: '✓' },
-  uncheck: { bg: 'bg-amber-50', text: 'text-amber-700', icon: '○' },
-  clear: { bg: 'bg-neutral-100', text: 'text-neutral-700', icon: '✕' },
-  update: { bg: 'bg-violet-50', text: 'text-violet-700', icon: '↻' },
-};
-
 const CATEGORY_ICONS = {
   'Fruits & Vegetables': '🥬', 'Meats': '🥩', 'Dairy': '🧈', 'Bakery': '🍞',
   'Canned & Packaged': '🥫', 'Frozen': '🧊', 'Beverages': '🥤', 'Deli': '🧀',
   'Snacks': '🍿', 'Pantry Staples': '🫙', 'Other': '📦',
+};
+
+const INTENT_COLORS = {
+  add: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+  remove: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' },
+  check: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' },
+  uncheck: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+  clear: { bg: 'bg-neutral-100', text: 'text-neutral-700', border: 'border-neutral-300' },
+  update: { bg: 'bg-violet-50', text: 'text-violet-700', border: 'border-violet-200' },
 };
 
 const EXAMPLES = [
@@ -232,307 +274,1018 @@ const EXAMPLES = [
   'clear the list',
 ];
 
-// ─── Tokenizer ───────────────────────────────────────────────────────
-function tokenize(text) {
-  const lowered = text.toLowerCase();
-  const tokens = new BigInt64Array(MAX_SEQ_LEN);
-  for (let i = 0; i < lowered.length && i < MAX_SEQ_LEN; i++) {
-    const code = lowered.charCodeAt(i);
-    tokens[i] = BigInt(code < 256 ? code + OFFSET : UNK);
-  }
-  return tokens;
-}
+// ═══════════════════════════════════════════════════════════════════
+// NLPEngine — model loading, tokenization, inference
+// ═══════════════════════════════════════════════════════════════════
+const NLPEngine = {
+  session: null,
 
-// ─── BIO Decoder (word-level) ────────────────────────────────────────
-function decodeBIO(tagIndices, text) {
-  const words = text.split(' ');
-  const numWords = Math.min(words.length, tagIndices.length);
-  const spans = [];
-  let currentType = null, spanStart = null, charPos = 0;
+  async init() {
+    const status = document.getElementById('model-status');
+    try {
+      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
+      this.session = await ort.InferenceSession.create('./grocery_nlp_quantized.onnx', {
+        executionProviders: ['wasm'],
+      });
+      status.textContent = 'Model ready';
+      status.className = 'text-xs text-emerald-500 font-medium';
+      return true;
+    } catch (e) {
+      status.textContent = 'Failed to load model';
+      status.className = 'text-xs text-red-500 font-medium';
+      console.error('Model load error:', e);
+      return false;
+    }
+  },
 
-  for (let w = 0; w < numWords; w++) {
-    const word = words[w];
-    const wordStart = charPos;
-    const wordEnd = charPos + word.length;
-    const tag = ENTITY_TAGS[tagIndices[w]] || 'O';
+  tokenize(text) {
+    const lowered = text.toLowerCase();
+    const tokens = new BigInt64Array(MAX_SEQ_LEN);
+    for (let i = 0; i < lowered.length && i < MAX_SEQ_LEN; i++) {
+      const code = lowered.charCodeAt(i);
+      tokens[i] = BigInt(code < 256 ? code + OFFSET : UNK);
+    }
+    return tokens;
+  },
 
-    if (tag.startsWith('B-')) {
-      const type = tag.slice(2);
-      if (type === 'VERB') {
-        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
-        currentType = null; spanStart = null;
+  decodeBIO(tagIndices, text) {
+    const words = text.split(' ');
+    const numWords = Math.min(words.length, tagIndices.length);
+    const spans = [];
+    let currentType = null, spanStart = null, charPos = 0;
+
+    for (let w = 0; w < numWords; w++) {
+      const word = words[w];
+      const wordStart = charPos;
+      const wordEnd = charPos + word.length;
+      const tag = ENTITY_TAGS[tagIndices[w]] || 'O';
+
+      if (tag.startsWith('B-')) {
+        const type = tag.slice(2);
+        if (type === 'VERB') {
+          if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+          currentType = null; spanStart = null;
+        } else {
+          if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+          currentType = type; spanStart = wordStart;
+        }
+      } else if (tag.startsWith('I-')) {
+        const type = tag.slice(2);
+        if (type === 'VERB') {
+          if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+          currentType = null; spanStart = null;
+        } else if (currentType !== type) {
+          if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+          currentType = type; spanStart = wordStart;
+        }
       } else {
         if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
-        currentType = type; spanStart = wordStart;
-      }
-    } else if (tag.startsWith('I-')) {
-      const type = tag.slice(2);
-      if (type === 'VERB') {
-        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
         currentType = null; spanStart = null;
-      } else if (currentType !== type) {
-        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
-        currentType = type; spanStart = wordStart;
       }
+      charPos = wordEnd + 1;
+    }
+    if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart).trim() }); }
+    return spans;
+  },
+
+  argmax(arr, offset, length) {
+    let maxI = 0, maxV = arr[offset];
+    for (let i = 1; i < length; i++) {
+      if (arr[offset + i] > maxV) { maxV = arr[offset + i]; maxI = i; }
+    }
+    return maxI;
+  },
+
+  async infer(text) {
+    if (!this.session || !text.trim()) return null;
+
+    const t0 = performance.now();
+    const tokens = this.tokenize(text);
+    const inputTensor = new ort.Tensor('int64', tokens, [1, MAX_SEQ_LEN]);
+    const results = await this.session.run({ input_ids: inputTensor });
+
+    const intentLogits = results.intent_logits.data;
+    const entityLogits = results.entity_logits.data;
+    const categoryLogits = results.category_logits.data;
+    const elapsed = Math.round(performance.now() - t0);
+
+    const intentIdx = this.argmax(intentLogits, 0, 6);
+    const intent = INTENTS[intentIdx];
+
+    const tags = [];
+    for (let w = 0; w < MAX_WORDS; w++) {
+      tags.push(this.argmax(entityLogits, w * 11, 11));
+    }
+
+    const spans = this.decodeBIO(tags, text);
+    const grouped = {};
+    for (const s of spans) {
+      (grouped[s.type] = grouped[s.type] || []).push(s);
+    }
+
+    const itemSpans = (grouped.ITEM || []).filter(s => s.text.length > 0);
+    const qtySpans = grouped.QTY || [];
+    const unitSpans = grouped.UNIT || [];
+    const storeSpans = (grouped.STORE || []).filter(s => s.text.length >= 3);
+    const store = storeSpans.length > 0 ? storeSpans[0].text : null;
+
+    const items = [];
+    for (let i = 0; i < itemSpans.length && i < 5; i++) {
+      let qty = null;
+      if (i < qtySpans.length) {
+        qty = qtySpans[i].text;
+        if (i < unitSpans.length) qty += ' ' + unitSpans[i].text;
+      }
+      const catIdx = this.argmax(categoryLogits, i * 11, 11);
+      items.push({
+        name: itemSpans[i].text,
+        quantity: qty,
+        category: CATEGORIES[catIdx],
+        store: store,
+      });
+    }
+
+    document.getElementById('latency-value').textContent = elapsed;
+
+    return { intent, items, store, elapsed, text };
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// GroceryList — state management for the accumulating list
+// ═══════════════════════════════════════════════════════════════════
+const GroceryList = {
+  items: [],
+  nextId: 1,
+  onChange: null,
+  // Track IDs that were just added so renderGroceryList can animate them
+  _newIds: new Set(),
+
+  // Fuzzy match: exact → startsWith → includes
+  _fuzzyFind(name) {
+    const norm = name.toLowerCase().trim();
+    let found = this.items.find(it => it.name.toLowerCase() === norm);
+    if (found) return found;
+    found = this.items.find(it => it.name.toLowerCase().startsWith(norm) || norm.startsWith(it.name.toLowerCase()));
+    if (found) return found;
+    found = this.items.find(it => it.name.toLowerCase().includes(norm) || norm.includes(it.name.toLowerCase()));
+    return found || null;
+  },
+
+  processResult(result) {
+    if (!result) return null;
+    const { intent, items } = result;
+    let action = null;
+
+    switch (intent) {
+      case 'add':
+      case 'update': {
+        const added = [];
+        const updated = [];
+        for (const item of items) {
+          const existing = this._fuzzyFind(item.name);
+          if (existing) {
+            if (item.quantity) existing.quantity = item.quantity;
+            if (item.store) existing.store = item.store;
+            if (item.category && item.category !== 'Other') existing.category = item.category;
+            updated.push(existing.name);
+          } else {
+            const newId = this.nextId++;
+            this.items.push({
+              id: newId,
+              name: item.name,
+              quantity: item.quantity,
+              category: item.category || 'Other',
+              store: item.store,
+              checked: false,
+            });
+            this._newIds.add(newId);
+            added.push(item.name);
+          }
+        }
+        if (added.length && updated.length) {
+          action = { type: 'add', message: `Added ${added.join(', ')} · Updated ${updated.join(', ')}` };
+        } else if (added.length) {
+          action = { type: 'add', message: `Added ${added.join(', ')}` };
+        } else if (updated.length) {
+          action = { type: 'update', message: `Updated ${updated.join(', ')}` };
+        }
+        break;
+      }
+      case 'remove': {
+        const toRemove = [];
+        const notFound = [];
+        for (const item of items) {
+          const existing = this._fuzzyFind(item.name);
+          if (existing) {
+            toRemove.push(existing);
+          } else {
+            notFound.push(item.name);
+          }
+        }
+        if (toRemove.length) {
+          // Animate out, then remove from data
+          UI.animateItemsOut(toRemove.map(it => it.id)).then(() => {
+            for (const it of toRemove) {
+              this.items = this.items.filter(x => x.id !== it.id);
+            }
+            if (this.onChange) this.onChange();
+          });
+          action = { type: 'remove', message: `Removed ${toRemove.map(it => it.name).join(', ')}` };
+          return action; // Early return — onChange called after animation
+        } else if (notFound.length) {
+          action = { type: 'error', message: `Couldn't find ${notFound.join(', ')}` };
+        }
+        break;
+      }
+      case 'check': {
+        const checked = [];
+        for (const item of items) {
+          const existing = this._fuzzyFind(item.name);
+          if (existing) {
+            existing.checked = true;
+            checked.push(existing.name);
+          }
+        }
+        if (checked.length) {
+          action = { type: 'check', message: `Checked off ${checked.join(', ')}` };
+        } else if (items.length) {
+          action = { type: 'error', message: `Couldn't find ${items.map(i => i.name).join(', ')}` };
+        }
+        break;
+      }
+      case 'uncheck': {
+        const unchecked = [];
+        for (const item of items) {
+          const existing = this._fuzzyFind(item.name);
+          if (existing) {
+            existing.checked = false;
+            unchecked.push(existing.name);
+          }
+        }
+        if (unchecked.length) {
+          action = { type: 'uncheck', message: `Unchecked ${unchecked.join(', ')}` };
+        }
+        break;
+      }
+      case 'clear': {
+        const count = this.items.length;
+        this.items = [];
+        action = { type: 'clear', message: count > 0 ? `Cleared ${count} item${count !== 1 ? 's' : ''}` : 'List is already empty' };
+        break;
+      }
+    }
+
+    if (this.onChange) this.onChange();
+    return action;
+  },
+
+  async removeById(id) {
+    const item = this.items.find(it => it.id === id);
+    if (item) {
+      await UI.animateItemsOut([id]);
+      this.items = this.items.filter(it => it.id !== id);
+      if (this.onChange) this.onChange();
+      return item.name;
+    }
+    return null;
+  },
+
+  toggleCheck(id) {
+    const item = this.items.find(it => it.id === id);
+    if (item) {
+      item.checked = !item.checked;
+      if (this.onChange) this.onChange();
+    }
+  },
+
+  clear() {
+    if (this.items.length === 0) return;
+    this.items = [];
+    if (this.onChange) this.onChange();
+    UI.showToast('Cleared list', 'clear');
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// AudioPipeline — mic stream, analyser, waveform visualization
+// ═══════════════════════════════════════════════════════════════════
+const AudioPipeline = {
+  canvas: null,
+  ctx: null,
+  analyser: null,
+  audioCtx: null,
+  stream: null,
+  animationId: null,
+  isSpeaking: false,
+
+  init() {
+    this.canvas = document.getElementById('waveform-canvas');
+    this.ctx = this.canvas.getContext('2d');
+    this._resize();
+    window.addEventListener('resize', () => this._resize());
+    this._drawIdle();
+  },
+
+  _resize() {
+    const rect = this.canvas.parentElement.getBoundingClientRect();
+    this.canvas.width = rect.width * window.devicePixelRatio;
+    this.canvas.height = 80 * window.devicePixelRatio;
+    this.canvas.style.width = rect.width + 'px';
+    this.canvas.style.height = '80px';
+  },
+
+  async start() {
+    try {
+      this._resize(); // Re-measure now that layout is final
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = this.audioCtx.createMediaStreamSource(this.stream);
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 256;
+      source.connect(this.analyser);
+      this._animate();
+      return this.stream;
+    } catch (e) {
+      console.error('Mic access error:', e);
+      throw e;
+    }
+  },
+
+  stop() {
+    if (this.animationId) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+    if (this.stream) {
+      this.stream.getTracks().forEach(t => t.stop());
+      this.stream = null;
+    }
+    if (this.audioCtx) {
+      this.audioCtx.close().catch(() => {});
+      this.audioCtx = null;
+    }
+    this.analyser = null;
+    this.isSpeaking = false;
+    this._drawIdle();
+  },
+
+  setSpeaking(val) {
+    this.isSpeaking = val;
+  },
+
+  _animate() {
+    if (!this.analyser) return;
+    const bufLen = this.analyser.frequencyBinCount;
+    const data = new Uint8Array(bufLen);
+
+    const draw = () => {
+      this.animationId = requestAnimationFrame(draw);
+      this.analyser.getByteFrequencyData(data);
+
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+      const dpr = window.devicePixelRatio;
+      this.ctx.clearRect(0, 0, w, h);
+
+      const barCount = 48;
+      const barWidth = Math.max(2, (w / barCount) * 0.5) ;
+      const gap = (w - barCount * barWidth) / (barCount + 1);
+      const color = this.isSpeaking ? '#3b82f6' : '#d1d5db';
+
+      const center = barCount / 2;
+      for (let i = 0; i < barCount; i++) {
+        // Map distance from center → frequency index
+        // Center bars get low freq (high energy), edges get high freq (quiet)
+        const distFromCenter = Math.abs(i - center + 0.5) / center;
+        const dataIdx = Math.floor(distFromCenter * (bufLen - 1));
+        const val = data[dataIdx] / 255;
+        const barH = Math.max(3 * dpr, val * h * 0.85);
+        const x = gap + i * (barWidth + gap);
+        const y = (h - barH) / 2;
+        const radius = Math.min(barWidth / 2, barH / 2);
+
+        this.ctx.beginPath();
+        this.ctx.roundRect(x, y, barWidth, barH, radius);
+        this.ctx.fillStyle = color;
+        this.ctx.fill();
+      }
+    };
+    draw();
+  },
+
+  _drawIdle() {
+    if (!this.canvas || !this.ctx) return;
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const dpr = window.devicePixelRatio;
+    this.ctx.clearRect(0, 0, w, h);
+
+    const barCount = 48;
+    const barWidth = Math.max(2, (w / barCount) * 0.5);
+    const gap = (w - barCount * barWidth) / (barCount + 1);
+
+    for (let i = 0; i < barCount; i++) {
+      const barH = 3 * dpr;
+      const x = gap + i * (barWidth + gap);
+      const y = (h - barH) / 2;
+      const radius = Math.min(barWidth / 2, barH / 2);
+      this.ctx.beginPath();
+      this.ctx.roundRect(x, y, barWidth, barH, radius);
+      this.ctx.fillStyle = '#e5e7eb';
+      this.ctx.fill();
+    }
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// VADController — Silero VAD via @ricky0123/vad-web
+// ═══════════════════════════════════════════════════════════════════
+const VADController = {
+  myvad: null,
+  isActive: false,
+  onSpeechStart: null,
+  onSpeechEnd: null,
+
+  async init() {
+    const ORT_CDN = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
+    const VAD_CDN = 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/';
+    console.log('[VAD] Initializing Silero VAD...');
+    console.log('[VAD] WASM path:', ORT_CDN);
+    console.log('[VAD] Asset path:', VAD_CDN);
+    try {
+      this.myvad = await vad.MicVAD.new({
+        positiveSpeechThreshold: 0.5,
+        negativeSpeechThreshold: 0.35,
+        redemptionFrames: 20,
+        minSpeechFrames: 5,
+        preSpeechPadFrames: 10,
+        onnxWASMBasePath: ORT_CDN,
+        baseAssetPath: VAD_CDN,
+        onSpeechStart: () => {
+          console.log('[VAD] 🟢 Speech start');
+          if (this.onSpeechStart) this.onSpeechStart();
+        },
+        onSpeechEnd: () => {
+          console.log('[VAD] 🔴 Speech end');
+          if (this.onSpeechEnd) this.onSpeechEnd();
+        },
+      });
+      console.log('[VAD] ✅ Silero VAD initialized successfully');
+      document.getElementById('vad-status').textContent = 'VAD active';
+      return true;
+    } catch (e) {
+      console.error('[VAD] ❌ Init failed:', e);
+      document.getElementById('vad-status').textContent = 'VAD failed';
+      return false;
+    }
+  },
+
+  start() {
+    this.isActive = true;
+    console.log('[VAD] Started listening');
+    if (this.myvad) this.myvad.start();
+  },
+
+  stop() {
+    this.isActive = false;
+    console.log('[VAD] Stopped');
+    if (this.myvad) this.myvad.pause();
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// SpeechController — Web Speech API continuous mode
+// ═══════════════════════════════════════════════════════════════════
+const SpeechController = {
+  recognition: null,
+  isListening: false,
+  pendingTranscript: '',
+  interimTranscript: '',
+  isSupported: false,
+  onTranscriptUpdate: null,
+  onAudioReady: null,
+  // Track how far into event.results we've already consumed,
+  // so old finalized results don't pile up across utterances.
+  resultOffset: 0,
+  lastResultCount: 0,
+
+  init() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      this.isSupported = false;
+      return;
+    }
+    this.isSupported = true;
+    this.recognition = new SR();
+    this.recognition.continuous = true;
+    this.recognition.interimResults = true;
+    this.recognition.lang = 'en-US';
+    this.recognition.maxAlternatives = 1;
+
+    this.recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+
+      // Only process results from resultOffset onwards to skip already-consumed results
+      for (let i = this.resultOffset; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalText += result[0].transcript;
+        } else {
+          interimText += result[0].transcript;
+        }
+      }
+      this.lastResultCount = event.results.length;
+
+      if (finalText) {
+        this.pendingTranscript = finalText;
+      }
+      this.interimTranscript = interimText;
+
+      if (this.onTranscriptUpdate) {
+        this.onTranscriptUpdate(this.pendingTranscript, this.interimTranscript);
+      }
+    };
+
+    this.recognition.onaudiostart = () => {
+      // Audio capture has actually begun — NOW we're really listening
+      if (this.onAudioReady) this.onAudioReady();
+    };
+
+    this.recognition.onend = () => {
+      // Auto-restart if we're supposed to be listening
+      if (this.isListening) {
+        // Buffer clears on restart, so reset offset
+        this.resultOffset = 0;
+        this.lastResultCount = 0;
+        try {
+          this.recognition.start();
+        } catch (e) {
+          // Already started, ignore
+        }
+      }
+    };
+
+    this.recognition.onerror = (e) => {
+      // Ignore no-speech and aborted errors (expected in continuous mode)
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      console.error('Speech error:', e.error);
+      if (e.error === 'not-allowed') {
+        UI.showToast('Microphone permission denied', 'error');
+        App.deactivate();
+      }
+    };
+  },
+
+  start() {
+    if (!this.recognition) return;
+    this.isListening = true;
+    this.pendingTranscript = '';
+    this.interimTranscript = '';
+    this.resultOffset = 0;
+    this.lastResultCount = 0;
+    try {
+      this.recognition.start();
+    } catch (e) {
+      // Already started
+    }
+  },
+
+  stop() {
+    this.isListening = false;
+    if (this.recognition) {
+      try { this.recognition.stop(); } catch (e) {}
+    }
+  },
+
+  consumeTranscript() {
+    const text = (this.pendingTranscript + ' ' + this.interimTranscript).trim();
+    this.pendingTranscript = '';
+    this.interimTranscript = '';
+    // Advance offset past all results we just consumed,
+    // so future onresult calls skip them
+    this.resultOffset = this.lastResultCount;
+    return text;
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// UI — DOM rendering, toasts, grocery list display
+// ═══════════════════════════════════════════════════════════════════
+const UI = {
+  updateStatus(state) {
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+
+    switch (state) {
+      case 'ready':
+        dot.className = 'w-2 h-2 rounded-full bg-neutral-300 transition-colors';
+        text.textContent = 'Ready';
+        text.className = 'text-sm text-neutral-400 font-medium';
+        break;
+      case 'starting':
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400 transition-colors animate-pulse';
+        text.textContent = 'Starting...';
+        text.className = 'text-sm text-amber-500 font-medium';
+        break;
+      case 'listening':
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-400 transition-colors';
+        text.textContent = 'Listening...';
+        text.className = 'text-sm text-emerald-600 font-medium';
+        break;
+      case 'speaking':
+        dot.className = 'w-2 h-2 rounded-full bg-blue-500 transition-colors animate-pulse';
+        text.textContent = 'Speaking...';
+        text.className = 'text-sm text-blue-600 font-medium';
+        break;
+      case 'processing':
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400 transition-colors animate-pulse';
+        text.textContent = 'Processing...';
+        text.className = 'text-sm text-amber-600 font-medium';
+        break;
+    }
+  },
+
+  updateTranscript(final, interim) {
+    const el = document.getElementById('live-transcript');
+    if (!final && !interim) {
+      el.innerHTML = '<span class="text-neutral-300">Say something...</span>';
+      return;
+    }
+    const display = final + (interim ? ' ' + interim : '');
+    el.innerHTML = `<span class="text-neutral-700">${escapeHtml(display)}</span><span class="typing-cursor"></span>`;
+  },
+
+  clearTranscript() {
+    const el = document.getElementById('live-transcript');
+    el.innerHTML = '<span class="text-neutral-300">Say something...</span>';
+  },
+
+  // state: 'idle' | 'starting' | 'active'
+  updateMicButton(state) {
+    const btn = document.getElementById('mic-btn');
+    const micIcon = document.getElementById('mic-icon');
+    const stopIcon = document.getElementById('mic-stop-icon');
+
+    if (state === 'starting') {
+      btn.className = 'shrink-0 w-10 h-10 rounded-lg bg-neutral-400 text-white flex items-center justify-center transition-all animate-pulse';
+      micIcon.classList.remove('hidden');
+      stopIcon.classList.add('hidden');
+    } else if (state === 'active') {
+      btn.className = 'shrink-0 w-10 h-10 rounded-lg bg-red-500 text-white flex items-center justify-center transition-all pulse-ring';
+      micIcon.classList.add('hidden');
+      stopIcon.classList.remove('hidden');
     } else {
-      if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
-      currentType = null; spanStart = null;
+      btn.className = 'shrink-0 w-10 h-10 rounded-lg bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all';
+      micIcon.classList.remove('hidden');
+      stopIcon.classList.add('hidden');
     }
-    charPos = wordEnd + 1;
-  }
-  if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart).trim() }); }
-  return spans;
-}
+  },
 
-function argmax(arr, offset, length) {
-  let maxI = 0, maxV = arr[offset];
-  for (let i = 1; i < length; i++) {
-    if (arr[offset + i] > maxV) { maxV = arr[offset + i]; maxI = i; }
-  }
-  return maxI;
-}
+  renderGroceryList() {
+    const container = document.getElementById('grocery-list-container');
+    const clearBtn = document.getElementById('clear-list-btn');
+    const items = GroceryList.items;
 
-// ─── ONNX Session ────────────────────────────────────────────────────
-let session = null;
-
-async function loadModel() {
-  const status = document.getElementById('model-status');
-  try {
-    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
-    session = await ort.InferenceSession.create('./grocery_nlp_quantized.onnx', {
-      executionProviders: ['wasm'],
-    });
-    status.textContent = 'Model ready';
-    status.className = 'text-xs text-emerald-500 font-medium';
-    document.getElementById('text-input').disabled = false;
-    document.getElementById('parse-btn').disabled = false;
-    document.getElementById('mic-btn').disabled = false;
-  } catch (e) {
-    status.textContent = 'Failed to load model';
-    status.className = 'text-xs text-red-500';
-    console.error('Model load error:', e);
-  }
-}
-
-async function runInference() {
-  const input = document.getElementById('text-input');
-  const text = input.value.trim();
-  if (!text || !session) return;
-
-  const t0 = performance.now();
-
-  const tokens = tokenize(text);
-  const inputTensor = new ort.Tensor('int64', tokens, [1, MAX_SEQ_LEN]);
-  const results = await session.run({ input_ids: inputTensor });
-
-  const intentLogits = results.intent_logits.data;
-  const entityLogits = results.entity_logits.data;
-  const categoryLogits = results.category_logits.data;
-
-  const elapsed = Math.round(performance.now() - t0);
-
-  // Intent
-  const intentIdx = argmax(intentLogits, 0, 6);
-  const intent = INTENTS[intentIdx];
-
-  // Entity tags (32 words x 11 tags)
-  const tags = [];
-  for (let w = 0; w < MAX_WORDS; w++) {
-    tags.push(argmax(entityLogits, w * 11, 11));
-  }
-
-  // Decode spans
-  const spans = decodeBIO(tags, text);
-  const grouped = {};
-  for (const s of spans) {
-    (grouped[s.type] = grouped[s.type] || []).push(s);
-  }
-
-  // Build items
-  const itemSpans = (grouped.ITEM || []).filter(s => s.text.length > 0);
-  const qtySpans = grouped.QTY || [];
-  const unitSpans = grouped.UNIT || [];
-  const storeSpans = (grouped.STORE || []).filter(s => s.text.length >= 3);
-  const store = storeSpans.length > 0 ? storeSpans[0].text : null;
-
-  const items = [];
-  for (let i = 0; i < itemSpans.length && i < 5; i++) {
-    let qty = null;
-    if (i < qtySpans.length) {
-      qty = qtySpans[i].text;
-      if (i < unitSpans.length) qty += ' ' + unitSpans[i].text;
+    if (items.length === 0) {
+      container.innerHTML = `
+        <div id="empty-state" class="text-center py-12 text-neutral-400">
+          <div class="text-4xl mb-3">🛒</div>
+          <p class="text-sm">Your list is empty — start by saying something</p>
+        </div>`;
+      clearBtn.classList.add('hidden');
+      return;
     }
-    const catIdx = argmax(categoryLogits, i * 11, 11);
-    items.push({
-      name: itemSpans[i].text,
-      quantity: qty,
-      category: CATEGORIES[catIdx],
-      store: store,
+
+    clearBtn.classList.remove('hidden');
+
+    // Group by category
+    const byCategory = {};
+    for (const item of items) {
+      const cat = item.category || 'Other';
+      (byCategory[cat] = byCategory[cat] || []).push(item);
+    }
+
+    // Sort categories by CATEGORIES order
+    const sortedCats = Object.keys(byCategory).sort((a, b) => {
+      return CATEGORIES.indexOf(a) - CATEGORIES.indexOf(b);
     });
-  }
 
-  displayResults(intent, items, store, elapsed, text);
-  document.getElementById('latency-value').textContent = elapsed;
-}
+    let html = '';
+    for (const cat of sortedCats) {
+      const catItems = byCategory[cat];
+      const icon = CATEGORY_ICONS[cat] || '📦';
+      html += `<div class="mb-4 fade-in">`;
+      html += `<div class="flex items-center gap-2 mb-2">`;
+      html += `<span class="text-base">${icon}</span>`;
+      html += `<h3 class="text-xs font-semibold text-neutral-400 uppercase tracking-wider">${escapeHtml(cat)}</h3>`;
+      html += `<span class="text-[10px] text-neutral-300">${catItems.length}</span>`;
+      html += `</div>`;
 
-// ─── Display ─────────────────────────────────────────────────────────
-function displayResults(intent, items, store, elapsed, rawText) {
-  const section = document.getElementById('results-section');
-  section.classList.remove('hidden');
+      for (const item of catItems) {
+        const checkedClass = item.checked ? 'checked-item' : '';
+        const isNew = GroceryList._newIds.has(item.id);
+        const animClass = isNew ? 'grocery-item-enter grocery-item-highlight' : '';
+        html += `<div class="${animClass} ${checkedClass} flex items-center gap-3 py-2.5 px-3 rounded-xl hover:bg-neutral-50 transition-colors group" data-id="${item.id}">`;
+        // Checkbox
+        html += `<button onclick="GroceryList.toggleCheck(${item.id})" class="shrink-0 w-5 h-5 rounded-md border-2 ${item.checked ? 'bg-blue-500 border-blue-500' : 'border-neutral-300 hover:border-neutral-400'} flex items-center justify-center transition-colors">`;
+        if (item.checked) {
+          html += `<svg class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+        }
+        html += `</button>`;
+        // Name + details
+        html += `<div class="flex-1 min-w-0">`;
+        html += `<span class="item-name text-sm font-medium text-neutral-900">${escapeHtml(item.name)}</span>`;
+        const details = [];
+        if (item.quantity) details.push(escapeHtml(item.quantity));
+        if (item.store) details.push('from ' + escapeHtml(item.store));
+        if (details.length) {
+          html += `<span class="text-xs text-neutral-400 ml-2">${details.join(' · ')}</span>`;
+        }
+        html += `</div>`;
+        // Remove button
+        html += `<button onclick="App.removeItem(${item.id})" class="shrink-0 opacity-0 group-hover:opacity-100 w-6 h-6 rounded-md hover:bg-red-50 flex items-center justify-center transition-all">`;
+        html += `<svg class="w-3.5 h-3.5 text-neutral-400 hover:text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`;
+        html += `</button>`;
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
 
-  // Intent badge
-  const badge = document.getElementById('intent-badge');
-  const ic = INTENT_COLORS[intent] || INTENT_COLORS.add;
-  badge.className = `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${ic.bg} ${ic.text}`;
-  badge.innerHTML = `<span class="font-semibold">${ic.icon}</span> ${intent}`;
+    container.innerHTML = html;
 
-  // Parse time
-  document.getElementById('parse-time').textContent = `${elapsed}ms`;
+    // Scroll first new item into view
+    if (GroceryList._newIds.size > 0) {
+      const firstNewId = GroceryList._newIds.values().next().value;
+      const el = container.querySelector(`[data-id="${firstNewId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      GroceryList._newIds.clear();
+    }
+  },
 
-  // Item cards
-  const container = document.getElementById('items-container');
-  container.innerHTML = '';
+  // Animate items out before removal — returns a Promise that resolves when animation completes
+  animateItemsOut(ids) {
+    const container = document.getElementById('grocery-list-container');
+    const els = ids.map(id => container.querySelector(`[data-id="${id}"]`)).filter(Boolean);
+    if (els.length === 0) return Promise.resolve();
 
-  if (items.length === 0) {
-    container.innerHTML = `<div class="text-sm text-neutral-400 py-4 fade-in">No items extracted — this is a "${intent}" command</div>`;
-  } else {
-    items.forEach((item, i) => {
-      const card = document.createElement('div');
-      card.className = 'item-card flex items-center gap-4 p-4 bg-surface rounded-xl border border-neutral-100';
-      const icon = CATEGORY_ICONS[item.category] || '📦';
-      card.innerHTML = `
-        <div class="text-2xl w-10 h-10 rounded-lg bg-white border border-neutral-100 flex items-center justify-center shrink-0">${icon}</div>
-        <div class="flex-1 min-w-0">
-          <div class="font-medium text-neutral-900">${escapeHtml(item.name)}</div>
-          <div class="text-xs text-neutral-400 mt-0.5">${escapeHtml(item.category)}${item.quantity ? ' &middot; ' + escapeHtml(item.quantity) : ''}${item.store ? ' &middot; from ' + escapeHtml(item.store) : ''}</div>
-        </div>
-        <span class="shrink-0 text-xs px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-500 font-medium">${escapeHtml(item.category)}</span>
-      `;
-      container.appendChild(card);
+    return new Promise(resolve => {
+      let done = 0;
+      for (const el of els) {
+        el.classList.add('grocery-item-exit');
+        el.addEventListener('animationend', () => {
+          done++;
+          if (done >= els.length) resolve();
+        }, { once: true });
+      }
+      // Safety timeout in case animationend doesn't fire
+      setTimeout(resolve, 350);
     });
-  }
+  },
 
-  // Raw output
-  const rawEl = document.getElementById('raw-output');
-  rawEl.classList.add('hidden');
-  const output = {
-    intent,
-    items: items.map(it => ({
-      name: it.name,
-      quantity: it.quantity,
-      category: it.category,
-      ...(it.store ? { store: it.store } : {}),
-    })),
-  };
-  rawEl.textContent = JSON.stringify(output, null, 2);
-}
+  showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
 
-function toggleRaw() {
-  document.getElementById('raw-output').classList.toggle('hidden');
-}
+    const colorMap = {
+      add: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      remove: 'bg-red-50 text-red-700 border-red-200',
+      check: 'bg-blue-50 text-blue-700 border-blue-200',
+      uncheck: 'bg-amber-50 text-amber-700 border-amber-200',
+      clear: 'bg-neutral-100 text-neutral-700 border-neutral-300',
+      update: 'bg-violet-50 text-violet-700 border-violet-200',
+      error: 'bg-red-50 text-red-600 border-red-200',
+      info: 'bg-neutral-50 text-neutral-700 border-neutral-200',
+    };
 
+    const colors = colorMap[type] || colorMap.info;
+    toast.className = `toast-enter px-4 py-2.5 rounded-xl border text-sm font-medium shadow-lg ${colors}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.remove('toast-enter');
+      toast.classList.add('toast-exit');
+      toast.addEventListener('animationend', () => toast.remove());
+    }, 3000);
+  },
+
+  renderExamples() {
+    const container = document.getElementById('examples-container');
+    EXAMPLES.forEach(ex => {
+      const btn = document.createElement('button');
+      btn.className = 'px-3 py-1.5 rounded-lg bg-neutral-50 border border-neutral-100 text-xs text-neutral-500 hover:bg-neutral-100 hover:border-neutral-200 transition-all';
+      btn.textContent = ex;
+      btn.onclick = () => {
+        document.getElementById('text-input').value = ex;
+        App.processTextInput();
+      };
+      container.appendChild(btn);
+    });
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// App — orchestrator
+// ═══════════════════════════════════════════════════════════════════
+const App = {
+  isActive: false,
+  processing: false,
+
+  async init() {
+    // 1. Load NLP model
+    const modelOk = await NLPEngine.init();
+
+    // 2. Init speech recognition
+    SpeechController.init();
+    SpeechController.onTranscriptUpdate = (final, interim) => {
+      UI.updateTranscript(final, interim);
+    };
+
+    // 3. Init audio pipeline
+    AudioPipeline.init();
+
+    // 4. Wire grocery list
+    GroceryList.onChange = () => UI.renderGroceryList();
+
+    // 5. Render UI
+    UI.renderExamples();
+    UI.renderGroceryList();
+
+    // 6. Enable controls
+    if (modelOk) {
+      document.getElementById('mic-btn').disabled = false;
+      document.getElementById('text-input').disabled = false;
+      document.getElementById('parse-btn').disabled = false;
+    }
+
+    // Hide mic button if SR not supported
+    if (!SpeechController.isSupported) {
+      document.getElementById('mic-btn').style.display = 'none';
+    }
+  },
+
+  async toggleMic() {
+    if (this.isActive) {
+      this.deactivate();
+    } else {
+      await this.activate();
+    }
+  },
+
+  async activate() {
+    console.log('[App] Activating...');
+    this.isActive = true;
+    UI.updateStatus('starting');
+    UI.updateMicButton('starting');
+
+    try {
+      console.log('[App] Requesting mic permission...');
+      await AudioPipeline.start();
+      console.log('[App] ✅ Mic stream acquired');
+    } catch (e) {
+      console.error('[App] ❌ Mic access denied:', e);
+      UI.showToast('Microphone access denied', 'error');
+      this.deactivate();
+      return;
+    }
+
+    // Wire VAD events
+    VADController.onSpeechStart = () => {
+      AudioPipeline.setSpeaking(true);
+      UI.updateStatus('speaking');
+    };
+    VADController.onSpeechEnd = () => {
+      AudioPipeline.setSpeaking(false);
+      this.onUtteranceEnd();
+    };
+
+    // Init Silero VAD (loads model on first call, reuses after)
+    if (!VADController.myvad) {
+      console.log('[App] Loading Silero VAD model...');
+      const vadOk = await VADController.init();
+      if (!vadOk) {
+        UI.showToast('Voice detection failed to load', 'error');
+        this.deactivate();
+        return;
+      }
+    }
+
+    // Transition to "Listening" only when audio capture actually begins
+    SpeechController.onAudioReady = () => {
+      console.log('[App] 🎙️ Audio capture started (onaudiostart)');
+      UI.updateMicButton('active');
+      UI.updateStatus('listening');
+      UI.clearTranscript();
+      VADController.start();
+    };
+
+    // Start speech recognition (onaudiostart will fire when ready)
+    console.log('[App] Starting speech recognition...');
+    SpeechController.start();
+  },
+
+  deactivate() {
+    this.isActive = false;
+    VADController.stop();
+    SpeechController.stop();
+    AudioPipeline.stop();
+
+    UI.updateMicButton('idle');
+    UI.updateStatus('ready');
+    document.getElementById('live-transcript').innerHTML = '';
+  },
+
+  async onUtteranceEnd() {
+    if (this.processing) {
+      console.log('[App] Skipping — already processing');
+      return;
+    }
+
+    console.log('[App] Utterance ended, waiting 250ms for SR to finalize...');
+    await new Promise(r => setTimeout(r, 250));
+
+    const text = SpeechController.consumeTranscript();
+    console.log('[App] Consumed transcript:', JSON.stringify(text));
+    if (!text.trim()) {
+      console.log('[App] Empty transcript, resuming listening');
+      UI.updateStatus('listening');
+      return;
+    }
+
+    this.processing = true;
+    UI.updateStatus('processing');
+
+    try {
+      console.log('[App] Running NLP inference...');
+      const result = await NLPEngine.infer(text);
+      console.log('[App] NLP result:', JSON.stringify(result, null, 2));
+      if (result) {
+        const action = GroceryList.processResult(result);
+        console.log('[App] List action:', action);
+        if (action) {
+          UI.showToast(action.message, action.type);
+        }
+      }
+    } catch (e) {
+      console.error('[App] Inference error:', e);
+      UI.showToast('Processing error — try again', 'error');
+    }
+
+    this.processing = false;
+
+    // Resume listening state
+    if (this.isActive) {
+      UI.updateStatus('listening');
+      UI.clearTranscript();
+    }
+  },
+
+  async processTextInput() {
+    const input = document.getElementById('text-input');
+    const text = input.value.trim();
+    if (!text || !NLPEngine.session) return;
+
+    try {
+      const result = await NLPEngine.infer(text);
+      if (result) {
+        const action = GroceryList.processResult(result);
+        if (action) {
+          UI.showToast(action.message, action.type);
+        }
+      }
+    } catch (e) {
+      console.error('Inference error:', e);
+      UI.showToast('Processing error', 'error');
+    }
+
+    input.value = '';
+  },
+
+  async removeItem(id) {
+    const name = await GroceryList.removeById(id);
+    if (name) {
+      UI.showToast(`Removed ${name}`, 'remove');
+    }
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ─── Web Speech API ──────────────────────────────────────────────────
-let recognition = null;
-let isListening = false;
-
-function initSpeech() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    document.getElementById('mic-btn').style.display = 'none';
-    document.getElementById('speech-hint').textContent = 'Type a grocery command to parse';
-    return;
-  }
-
-  recognition = new SR();
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
-
-  recognition.onresult = (event) => {
-    const input = document.getElementById('text-input');
-    let transcript = '';
-    for (let i = 0; i < event.results.length; i++) {
-      transcript += event.results[i][0].transcript;
-    }
-    input.value = transcript;
-
-    if (event.results[event.results.length - 1].isFinal) {
-      stopMic();
-      runInference();
-    }
-  };
-
-  recognition.onend = () => {
-    if (isListening) stopMic();
-  };
-
-  recognition.onerror = (e) => {
-    console.error('Speech error:', e.error);
-    stopMic();
-    const status = document.getElementById('speech-status');
-    if (e.error === 'not-allowed') {
-      status.textContent = 'Microphone permission denied';
-    } else {
-      status.textContent = 'Speech error: ' + e.error;
-    }
-    status.classList.remove('hidden');
-    setTimeout(() => status.classList.add('hidden'), 3000);
-  };
-}
-
-function toggleMic() {
-  if (isListening) { stopMic(); }
-  else { startMic(); }
-}
-
-function startMic() {
-  if (!recognition) return;
-  isListening = true;
-  recognition.start();
-
-  const btn = document.getElementById('mic-btn');
-  btn.className = 'shrink-0 w-12 h-12 rounded-xl bg-red-500 text-white flex items-center justify-center transition-all pulse-ring';
-  document.getElementById('mic-icon').classList.add('hidden');
-  document.getElementById('mic-stop-icon').classList.remove('hidden');
-  document.getElementById('text-input').placeholder = 'Listening...';
-}
-
-function stopMic() {
-  isListening = false;
-  try { recognition.stop(); } catch(e) {}
-
-  const btn = document.getElementById('mic-btn');
-  btn.className = 'shrink-0 w-12 h-12 rounded-xl bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all';
-  document.getElementById('mic-icon').classList.remove('hidden');
-  document.getElementById('mic-stop-icon').classList.add('hidden');
-  document.getElementById('text-input').placeholder = 'Try "add 2 gallons of milk and a loaf of bread from Costco"';
-}
-
-// ─── Examples ────────────────────────────────────────────────────────
-function renderExamples() {
-  const container = document.getElementById('examples-container');
-  EXAMPLES.forEach(ex => {
-    const btn = document.createElement('button');
-    btn.className = 'px-3.5 py-2 rounded-lg bg-neutral-50 border border-neutral-100 text-sm text-neutral-600 hover:bg-neutral-100 hover:border-neutral-200 transition-all';
-    btn.textContent = ex;
-    btn.onclick = () => {
-      document.getElementById('text-input').value = ex;
-      runInference();
-    };
-    container.appendChild(btn);
-  });
-}
-
-// ─── Init ────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// Bootstrap
+// ═══════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-  loadModel();
-  initSpeech();
-  renderExamples();
+  App.init();
 });
 </script>
 </body>
