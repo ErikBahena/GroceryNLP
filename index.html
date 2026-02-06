@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GroceryNLP — On-Device Voice Parsing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/ort.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    .pulse-ring {
+      animation: pulseRing 1.5s ease-out infinite;
+    }
+    @keyframes pulseRing {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+      70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    .item-card { animation: slideUp 0.35s ease-out both; }
+    .item-card:nth-child(1) { animation-delay: 0ms; }
+    .item-card:nth-child(2) { animation-delay: 80ms; }
+    .item-card:nth-child(3) { animation-delay: 160ms; }
+    .item-card:nth-child(4) { animation-delay: 240ms; }
+    .item-card:nth-child(5) { animation-delay: 320ms; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+    .typing-cursor::after {
+      content: '|';
+      animation: blink 0.8s step-end infinite;
+      color: #3b82f6;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .metric-bar { transition: width 0.6s ease-out; }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#fafafa',
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-white text-neutral-900 antialiased">
+
+  <!-- Nav -->
+  <nav class="fixed top-0 w-full bg-white/80 backdrop-blur-lg border-b border-neutral-100 z-50">
+    <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <!-- Logo mark: voice waveform × grocery list in a rounded square -->
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#111827"/>
+              <stop offset="100%" stop-color="#374151"/>
+            </linearGradient>
+          </defs>
+          <rect width="32" height="32" rx="8" fill="url(#logo-grad)"/>
+          <!-- Mic body (vertical pill) -->
+          <rect x="8" y="7" width="5" height="12" rx="2.5" fill="white" opacity="0.95"/>
+          <!-- Mic base arc -->
+          <path d="M7 17.5a3.5 3.5 0 0 0 7 0" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
+          <!-- Mic stand -->
+          <line x1="10.5" y1="21" x2="10.5" y2="24" stroke="white" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+          <!-- List lines / sound waves (right side) -->
+          <rect x="17" y="9.5" width="8" height="1.8" rx="0.9" fill="white" opacity="0.9"/>
+          <rect x="17" y="15.1" width="6" height="1.8" rx="0.9" fill="white" opacity="0.55"/>
+          <rect x="17" y="20.7" width="4.5" height="1.8" rx="0.9" fill="white" opacity="0.3"/>
+        </svg>
+        <!-- Wordmark -->
+        <div class="flex items-baseline leading-none">
+          <span class="text-[15px] font-light tracking-tight text-neutral-900">grocery</span><span class="text-[15px] font-semibold tracking-tight text-neutral-900">nlp</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-5">
+        <span id="model-status" class="text-xs text-neutral-400 font-medium">Loading model...</span>
+        <div class="w-px h-4 bg-neutral-200"></div>
+        <a href="https://github.com/ErikBahena/GroceryNLP" target="_blank" class="flex items-center gap-2 text-neutral-400 hover:text-neutral-600 transition-colors" aria-label="GitHub">
+          <svg class="w-[18px] h-[18px]" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+        <a href="https://github.com/ErikBahena" target="_blank" class="shrink-0" aria-label="ErikBahena on GitHub">
+          <img src="https://avatars.githubusercontent.com/u/80177106?v=4" alt="ErikBahena" class="w-7 h-7 rounded-full ring-1 ring-neutral-200 hover:ring-neutral-400 transition-all"/>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <main class="max-w-5xl mx-auto px-6">
+    <section class="pt-32 pb-16">
+      <div class="max-w-2xl">
+        <h1 class="text-4xl sm:text-5xl font-bold tracking-tight leading-[1.1] text-neutral-900">
+          Voice to groceries.<br>
+          <span class="text-neutral-400">On-device. Instant.</span>
+        </h1>
+        <p class="mt-5 text-lg text-neutral-500 leading-relaxed max-w-lg">
+          A 0.6MB neural network that extracts items, quantities, stores, and categories from natural speech. Runs entirely in your browser.
+        </p>
+      </div>
+
+      <!-- Metrics row -->
+      <div class="mt-10 flex flex-wrap gap-8">
+        <div>
+          <div class="text-2xl font-semibold tabular-nums" id="metric-size">0.63<span class="text-sm font-normal text-neutral-400 ml-1">MB</span></div>
+          <div class="text-xs text-neutral-400 mt-0.5">Model size</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold tabular-nums" id="metric-latency"><span id="latency-value">—</span><span class="text-sm font-normal text-neutral-400 ml-1">ms</span></div>
+          <div class="text-xs text-neutral-400 mt-0.5">Inference</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold tabular-nums">99.9<span class="text-sm font-normal text-neutral-400 ml-1">%</span></div>
+          <div class="text-xs text-neutral-400 mt-0.5">Intent accuracy</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold tabular-nums">98.7<span class="text-sm font-normal text-neutral-400 ml-1">%</span></div>
+          <div class="text-xs text-neutral-400 mt-0.5">Entity F1</div>
+        </div>
+        <div>
+          <div class="text-2xl font-semibold tabular-nums">96.3<span class="text-sm font-normal text-neutral-400 ml-1">%</span></div>
+          <div class="text-xs text-neutral-400 mt-0.5">Category accuracy</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Input section -->
+    <section class="pb-8">
+      <div class="bg-surface rounded-2xl border border-neutral-200 p-1.5">
+        <div class="flex items-center gap-3">
+          <button id="mic-btn" onclick="toggleMic()" disabled
+            class="shrink-0 w-12 h-12 rounded-xl bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            <svg id="mic-icon" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+            <svg id="mic-stop-icon" class="w-5 h-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+          </button>
+          <input id="text-input" type="text"
+            placeholder="Try &quot;add 2 gallons of milk and a loaf of bread from Costco&quot;"
+            class="flex-1 bg-transparent text-base outline-none placeholder:text-neutral-400 h-12"
+            disabled
+            onkeydown="if(event.key==='Enter')runInference()">
+          <button onclick="runInference()" id="parse-btn" disabled
+            class="shrink-0 h-10 px-5 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+            Parse
+          </button>
+        </div>
+      </div>
+      <div class="mt-3 flex items-center justify-between">
+        <p id="speech-hint" class="text-xs text-neutral-400">Press the mic or type a grocery command</p>
+        <p id="speech-status" class="text-xs text-neutral-400 hidden"></p>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="results-section" class="pb-20 hidden">
+      <!-- Intent bar -->
+      <div class="flex items-center gap-3 mb-6 fade-in">
+        <span id="intent-badge" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"></span>
+        <span id="parse-time" class="text-xs text-neutral-400 tabular-nums"></span>
+      </div>
+
+      <!-- Item cards -->
+      <div id="items-container" class="space-y-3"></div>
+
+      <!-- Raw output toggle -->
+      <button onclick="toggleRaw()" class="mt-6 text-xs text-neutral-400 hover:text-neutral-600 transition-colors underline underline-offset-2">
+        Show raw output
+      </button>
+      <pre id="raw-output" class="hidden mt-3 p-4 bg-neutral-50 rounded-xl border border-neutral-100 text-xs text-neutral-600 overflow-x-auto"></pre>
+    </section>
+
+    <!-- Examples -->
+    <section class="pb-20">
+      <h3 class="text-xs font-medium text-neutral-400 uppercase tracking-widest mb-4">Try these</h3>
+      <div class="flex flex-wrap gap-2" id="examples-container"></div>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-neutral-100">
+    <div class="max-w-5xl mx-auto px-6 py-8 flex items-center justify-between text-xs text-neutral-400">
+      <span><span class="font-light">grocery</span><span class="font-semibold">nlp</span> &mdash; 0.63MB ONNX model running in your browser</span>
+      <a href="https://github.com/ErikBahena" target="_blank" class="flex items-center gap-2 hover:text-neutral-600 transition-colors">
+        <span>Built by ErikB</span>
+        <img src="https://avatars.githubusercontent.com/u/80177106?v=4&s=48" alt="" class="w-5 h-5 rounded-full"/>
+      </a>
+    </div>
+  </footer>
+
+<script>
+// ─── Constants ───────────────────────────────────────────────────────
+const MAX_SEQ_LEN = 128;
+const PAD = 0, UNK = 1, OFFSET = 2;
+const MAX_WORDS = 32;
+
+const INTENTS = ['add', 'remove', 'check', 'uncheck', 'clear', 'update'];
+const ENTITY_TAGS = ['O','B-ITEM','I-ITEM','B-QTY','I-QTY','B-UNIT','I-UNIT','B-STORE','I-STORE','B-VERB','I-VERB'];
+const CATEGORIES = ['Fruits & Vegetables','Meats','Dairy','Bakery','Canned & Packaged','Frozen','Beverages','Deli','Snacks','Pantry Staples','Other'];
+
+const INTENT_COLORS = {
+  add: { bg: 'bg-emerald-50', text: 'text-emerald-700', icon: '+' },
+  remove: { bg: 'bg-red-50', text: 'text-red-700', icon: '−' },
+  check: { bg: 'bg-blue-50', text: 'text-blue-700', icon: '✓' },
+  uncheck: { bg: 'bg-amber-50', text: 'text-amber-700', icon: '○' },
+  clear: { bg: 'bg-neutral-100', text: 'text-neutral-700', icon: '✕' },
+  update: { bg: 'bg-violet-50', text: 'text-violet-700', icon: '↻' },
+};
+
+const CATEGORY_ICONS = {
+  'Fruits & Vegetables': '🥬', 'Meats': '🥩', 'Dairy': '🧈', 'Bakery': '🍞',
+  'Canned & Packaged': '🥫', 'Frozen': '🧊', 'Beverages': '🥤', 'Deli': '🧀',
+  'Snacks': '🍿', 'Pantry Staples': '🫙', 'Other': '📦',
+};
+
+const EXAMPLES = [
+  'add 2 gallons of milk and a loaf of bread from Costco',
+  'I need chicken breast and rice',
+  'put bananas on the list',
+  'remove eggs',
+  'add 3 lbs of ground beef from Walmart',
+  'check off the milk',
+  'we need orange juice and frozen pizza',
+  'add paper towels and dish soap',
+  'clear the list',
+];
+
+// ─── Tokenizer ───────────────────────────────────────────────────────
+function tokenize(text) {
+  const lowered = text.toLowerCase();
+  const tokens = new BigInt64Array(MAX_SEQ_LEN);
+  for (let i = 0; i < lowered.length && i < MAX_SEQ_LEN; i++) {
+    const code = lowered.charCodeAt(i);
+    tokens[i] = BigInt(code < 256 ? code + OFFSET : UNK);
+  }
+  return tokens;
+}
+
+// ─── BIO Decoder (word-level) ────────────────────────────────────────
+function decodeBIO(tagIndices, text) {
+  const words = text.split(' ');
+  const numWords = Math.min(words.length, tagIndices.length);
+  const spans = [];
+  let currentType = null, spanStart = null, charPos = 0;
+
+  for (let w = 0; w < numWords; w++) {
+    const word = words[w];
+    const wordStart = charPos;
+    const wordEnd = charPos + word.length;
+    const tag = ENTITY_TAGS[tagIndices[w]] || 'O';
+
+    if (tag.startsWith('B-')) {
+      const type = tag.slice(2);
+      if (type === 'VERB') {
+        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+        currentType = null; spanStart = null;
+      } else {
+        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+        currentType = type; spanStart = wordStart;
+      }
+    } else if (tag.startsWith('I-')) {
+      const type = tag.slice(2);
+      if (type === 'VERB') {
+        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+        currentType = null; spanStart = null;
+      } else if (currentType !== type) {
+        if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+        currentType = type; spanStart = wordStart;
+      }
+    } else {
+      if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart, charPos).trim() }); }
+      currentType = null; spanStart = null;
+    }
+    charPos = wordEnd + 1;
+  }
+  if (currentType) { spans.push({ type: currentType, text: text.slice(spanStart).trim() }); }
+  return spans;
+}
+
+function argmax(arr, offset, length) {
+  let maxI = 0, maxV = arr[offset];
+  for (let i = 1; i < length; i++) {
+    if (arr[offset + i] > maxV) { maxV = arr[offset + i]; maxI = i; }
+  }
+  return maxI;
+}
+
+// ─── ONNX Session ────────────────────────────────────────────────────
+let session = null;
+
+async function loadModel() {
+  const status = document.getElementById('model-status');
+  try {
+    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.0/dist/';
+    session = await ort.InferenceSession.create('./grocery_nlp_quantized.onnx', {
+      executionProviders: ['wasm'],
+    });
+    status.textContent = 'Model ready';
+    status.className = 'text-xs text-emerald-500 font-medium';
+    document.getElementById('text-input').disabled = false;
+    document.getElementById('parse-btn').disabled = false;
+    document.getElementById('mic-btn').disabled = false;
+  } catch (e) {
+    status.textContent = 'Failed to load model';
+    status.className = 'text-xs text-red-500';
+    console.error('Model load error:', e);
+  }
+}
+
+async function runInference() {
+  const input = document.getElementById('text-input');
+  const text = input.value.trim();
+  if (!text || !session) return;
+
+  const t0 = performance.now();
+
+  const tokens = tokenize(text);
+  const inputTensor = new ort.Tensor('int64', tokens, [1, MAX_SEQ_LEN]);
+  const results = await session.run({ input_ids: inputTensor });
+
+  const intentLogits = results.intent_logits.data;
+  const entityLogits = results.entity_logits.data;
+  const categoryLogits = results.category_logits.data;
+
+  const elapsed = Math.round(performance.now() - t0);
+
+  // Intent
+  const intentIdx = argmax(intentLogits, 0, 6);
+  const intent = INTENTS[intentIdx];
+
+  // Entity tags (32 words x 11 tags)
+  const tags = [];
+  for (let w = 0; w < MAX_WORDS; w++) {
+    tags.push(argmax(entityLogits, w * 11, 11));
+  }
+
+  // Decode spans
+  const spans = decodeBIO(tags, text);
+  const grouped = {};
+  for (const s of spans) {
+    (grouped[s.type] = grouped[s.type] || []).push(s);
+  }
+
+  // Build items
+  const itemSpans = (grouped.ITEM || []).filter(s => s.text.length > 0);
+  const qtySpans = grouped.QTY || [];
+  const unitSpans = grouped.UNIT || [];
+  const storeSpans = (grouped.STORE || []).filter(s => s.text.length >= 3);
+  const store = storeSpans.length > 0 ? storeSpans[0].text : null;
+
+  const items = [];
+  for (let i = 0; i < itemSpans.length && i < 5; i++) {
+    let qty = null;
+    if (i < qtySpans.length) {
+      qty = qtySpans[i].text;
+      if (i < unitSpans.length) qty += ' ' + unitSpans[i].text;
+    }
+    const catIdx = argmax(categoryLogits, i * 11, 11);
+    items.push({
+      name: itemSpans[i].text,
+      quantity: qty,
+      category: CATEGORIES[catIdx],
+      store: store,
+    });
+  }
+
+  displayResults(intent, items, store, elapsed, text);
+  document.getElementById('latency-value').textContent = elapsed;
+}
+
+// ─── Display ─────────────────────────────────────────────────────────
+function displayResults(intent, items, store, elapsed, rawText) {
+  const section = document.getElementById('results-section');
+  section.classList.remove('hidden');
+
+  // Intent badge
+  const badge = document.getElementById('intent-badge');
+  const ic = INTENT_COLORS[intent] || INTENT_COLORS.add;
+  badge.className = `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${ic.bg} ${ic.text}`;
+  badge.innerHTML = `<span class="font-semibold">${ic.icon}</span> ${intent}`;
+
+  // Parse time
+  document.getElementById('parse-time').textContent = `${elapsed}ms`;
+
+  // Item cards
+  const container = document.getElementById('items-container');
+  container.innerHTML = '';
+
+  if (items.length === 0) {
+    container.innerHTML = `<div class="text-sm text-neutral-400 py-4 fade-in">No items extracted — this is a "${intent}" command</div>`;
+  } else {
+    items.forEach((item, i) => {
+      const card = document.createElement('div');
+      card.className = 'item-card flex items-center gap-4 p-4 bg-surface rounded-xl border border-neutral-100';
+      const icon = CATEGORY_ICONS[item.category] || '📦';
+      card.innerHTML = `
+        <div class="text-2xl w-10 h-10 rounded-lg bg-white border border-neutral-100 flex items-center justify-center shrink-0">${icon}</div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-neutral-900">${escapeHtml(item.name)}</div>
+          <div class="text-xs text-neutral-400 mt-0.5">${escapeHtml(item.category)}${item.quantity ? ' &middot; ' + escapeHtml(item.quantity) : ''}${item.store ? ' &middot; from ' + escapeHtml(item.store) : ''}</div>
+        </div>
+        <span class="shrink-0 text-xs px-2.5 py-1 rounded-full bg-neutral-100 text-neutral-500 font-medium">${escapeHtml(item.category)}</span>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  // Raw output
+  const rawEl = document.getElementById('raw-output');
+  rawEl.classList.add('hidden');
+  const output = {
+    intent,
+    items: items.map(it => ({
+      name: it.name,
+      quantity: it.quantity,
+      category: it.category,
+      ...(it.store ? { store: it.store } : {}),
+    })),
+  };
+  rawEl.textContent = JSON.stringify(output, null, 2);
+}
+
+function toggleRaw() {
+  document.getElementById('raw-output').classList.toggle('hidden');
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Web Speech API ──────────────────────────────────────────────────
+let recognition = null;
+let isListening = false;
+
+function initSpeech() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    document.getElementById('mic-btn').style.display = 'none';
+    document.getElementById('speech-hint').textContent = 'Type a grocery command to parse';
+    return;
+  }
+
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (event) => {
+    const input = document.getElementById('text-input');
+    let transcript = '';
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    input.value = transcript;
+
+    if (event.results[event.results.length - 1].isFinal) {
+      stopMic();
+      runInference();
+    }
+  };
+
+  recognition.onend = () => {
+    if (isListening) stopMic();
+  };
+
+  recognition.onerror = (e) => {
+    console.error('Speech error:', e.error);
+    stopMic();
+    const status = document.getElementById('speech-status');
+    if (e.error === 'not-allowed') {
+      status.textContent = 'Microphone permission denied';
+    } else {
+      status.textContent = 'Speech error: ' + e.error;
+    }
+    status.classList.remove('hidden');
+    setTimeout(() => status.classList.add('hidden'), 3000);
+  };
+}
+
+function toggleMic() {
+  if (isListening) { stopMic(); }
+  else { startMic(); }
+}
+
+function startMic() {
+  if (!recognition) return;
+  isListening = true;
+  recognition.start();
+
+  const btn = document.getElementById('mic-btn');
+  btn.className = 'shrink-0 w-12 h-12 rounded-xl bg-red-500 text-white flex items-center justify-center transition-all pulse-ring';
+  document.getElementById('mic-icon').classList.add('hidden');
+  document.getElementById('mic-stop-icon').classList.remove('hidden');
+  document.getElementById('text-input').placeholder = 'Listening...';
+}
+
+function stopMic() {
+  isListening = false;
+  try { recognition.stop(); } catch(e) {}
+
+  const btn = document.getElementById('mic-btn');
+  btn.className = 'shrink-0 w-12 h-12 rounded-xl bg-neutral-900 text-white flex items-center justify-center hover:bg-neutral-800 transition-all';
+  document.getElementById('mic-icon').classList.remove('hidden');
+  document.getElementById('mic-stop-icon').classList.add('hidden');
+  document.getElementById('text-input').placeholder = 'Try "add 2 gallons of milk and a loaf of bread from Costco"';
+}
+
+// ─── Examples ────────────────────────────────────────────────────────
+function renderExamples() {
+  const container = document.getElementById('examples-container');
+  EXAMPLES.forEach(ex => {
+    const btn = document.createElement('button');
+    btn.className = 'px-3.5 py-2 rounded-lg bg-neutral-50 border border-neutral-100 text-sm text-neutral-600 hover:bg-neutral-100 hover:border-neutral-200 transition-all';
+    btn.textContent = ex;
+    btn.onclick = () => {
+      document.getElementById('text-input').value = ex;
+      runInference();
+    };
+    container.appendChild(btn);
+  });
+}
+
+// ─── Init ────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadModel();
+  initSpeech();
+  renderExamples();
+});
+</script>
+</body>
+</html>
