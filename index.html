@@ -3,7 +3,52 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GroceryNLP — On-Device Voice Parsing</title>
+  <title>GroceryNLP — On-Device Voice to Grocery List</title>
+  <meta name="description" content="A 0.6MB neural network that converts voice commands into structured grocery lists. Extracts items, quantities, stores, and categories from natural speech — entirely in your browser.">
+  <meta name="keywords" content="grocery list, voice recognition, NLP, on-device AI, ONNX, speech to text, grocery parser, neural network, browser AI">
+  <meta name="author" content="Erik Bahena">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://erikbahena.github.io/GroceryNLP/">
+  <link rel="icon" type="image/png" href="./favicon.png">
+
+  <!-- Open Graph / Facebook / Slack / Discord -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://erikbahena.github.io/GroceryNLP/">
+  <meta property="og:title" content="GroceryNLP — Voice to Grocery List, On-Device">
+  <meta property="og:description" content="A 0.6MB neural network that converts voice commands into structured grocery lists. Items, quantities, stores, and categories — all extracted in ~1ms, entirely in your browser.">
+  <meta property="og:image" content="https://erikbahena.github.io/GroceryNLP/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="GroceryNLP">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="GroceryNLP — Voice to Grocery List, On-Device">
+  <meta name="twitter:description" content="A 0.6MB neural network that converts voice commands into structured grocery lists — entirely in your browser.">
+  <meta name="twitter:image" content="https://erikbahena.github.io/GroceryNLP/og-image.png">
+
+  <!-- Theme -->
+  <meta name="theme-color" content="#111827">
+
+  <!-- Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "GroceryNLP",
+    "description": "A 0.6MB on-device neural network that converts voice commands into structured grocery lists with items, quantities, stores, and categories.",
+    "url": "https://erikbahena.github.io/GroceryNLP/",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Any (browser-based)",
+    "author": {
+      "@type": "Person",
+      "name": "Erik Bahena",
+      "url": "https://github.com/ErikBahena"
+    },
+    "offers": { "@type": "Offer", "price": "0" }
+  }
+  </script>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.wasm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/bundle.min.js"></script>
