@@ -198,6 +198,14 @@
       </div>
     </section>
 
+    <!-- Last result -->
+    <section id="last-result-section" class="pb-4 hidden">
+      <button onclick="document.getElementById('raw-output').classList.toggle('hidden')" class="text-xs text-neutral-400 hover:text-neutral-600 transition-colors underline underline-offset-2">
+        Show raw output
+      </button>
+      <pre id="raw-output" class="hidden mt-2 p-4 bg-neutral-50 rounded-xl border border-neutral-100 text-xs text-neutral-600 overflow-x-auto"></pre>
+    </section>
+
     <!-- Suggestions -->
     <section class="pb-6">
       <h3 class="text-xs font-medium text-neutral-400 uppercase tracking-widest mb-3">Try saying</h3>
@@ -406,6 +414,20 @@ const NLPEngine = {
     }
 
     document.getElementById('latency-value').textContent = elapsed;
+
+    // Update raw output panel
+    const rawResult = {
+      intent,
+      items: items.map(it => ({
+        name: it.name,
+        quantity: it.quantity,
+        category: it.category,
+        ...(store ? { store } : {}),
+      })),
+      elapsed_ms: elapsed,
+    };
+    document.getElementById('last-result-section').classList.remove('hidden');
+    document.getElementById('raw-output').textContent = JSON.stringify(rawResult, null, 2);
 
     return { intent, items, store, elapsed, text };
   },
